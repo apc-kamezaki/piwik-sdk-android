@@ -186,6 +186,11 @@ public class Tracker {
         return false;
     }
 
+    public boolean dispatch(boolean saveIfErrorOccurs) {
+        mDispatcher.setWriteFileOnError(saveIfErrorOccurs);
+        return dispatch();
+    }
+
     /**
      * Set the interval to 0 to dispatch events as soon as they are queued.
      * If a negative value is used the dispatch timer will never run, a manual dispatch must be used.

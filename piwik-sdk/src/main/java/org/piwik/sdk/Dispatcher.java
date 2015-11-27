@@ -7,6 +7,7 @@
 
 package org.piwik.sdk;
 
+import android.content.Context;
 import android.os.Process;
 
 import org.apache.http.HttpResponse;
@@ -23,6 +24,15 @@ import org.apache.http.protocol.HTTP;
 import org.json.JSONObject;
 import org.piwik.sdk.tools.Logy;
 
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.Closeable;
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
 import java.io.UnsupportedEncodingException;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -51,6 +61,7 @@ import java.util.concurrent.TimeUnit;
 @SuppressWarnings("deprecation")
 public class Dispatcher {
     private static final String LOGGER_TAG = Piwik.LOGGER_PREFIX + "Dispatcher";
+    private static final String EVENTS_FILE = "piwik_sdk_events.txt";
     private final BlockingQueue<String> mDispatchQueue = new LinkedBlockingQueue<>();
     private final Object mThreadControl = new Object();
     private final Semaphore mSleepToken = new Semaphore(0);
@@ -62,6 +73,7 @@ public class Dispatcher {
 
     private volatile int mTimeOut = 5 * 1000; // 5s
     private volatile boolean mRunning = false;
+    private volatile boolean mWriteFileOnError = false;
 
     private volatile long mDispatchInterval = 120 * 1000; // 120s
 
@@ -69,6 +81,10 @@ public class Dispatcher {
         mPiwik = piwik;
         mApiUrl = apiUrl;
         mAuthToken = authToken;
+
+        List<String> remainEvents = restoreEventsFromFile();
+        if (remainEvents.size() > 0)
+            mDispatchQueue.addAll(remainEvents);
     }
 
     /**
@@ -92,6 +108,10 @@ public class Dispatcher {
 
     public long getDispatchInterval() {
         return mDispatchInterval;
+    }
+
+    protected void setWriteFileOnError(boolean needOutputFile) {
+        mWriteFileOnError = needOutputFile;
     }
 
     private boolean launch() {
@@ -163,6 +183,11 @@ public class Dispatcher {
                     do {
                         mDispatchQueue.addAll(wrapper.getEventsByList(page));
                     } while ((page = pageIterator.next()) != null);
+                    if (mWriteFileOnError) {
+                        List<String> remainEvents = new ArrayList<>();
+                        mDispatchQueue.drainTo(remainEvents);
+                        saveEventsToFile(remainEvents);
+                    }
                 }
                 Logy.d(LOGGER_TAG, "Dispatched " + count + " events.");
                 synchronized (mThreadControl) {
@@ -266,4 +291,69 @@ public class Dispatcher {
         return mDryRunOutput;
     }
 
+    private List<String> restoreEventsFromFile() {
+        File file = mPiwik.getContext().getFileStreamPath(EVENTS_FILE);
+        Logy.e(LOGGER_TAG, "file name " + file.getAbsolutePath());
+        if (!file.exists()) {
+            return Collections.EMPTY_LIST;
+        }
+        InputStream is = null;
+        BufferedReader br = null;
+        try {
+            is = mPiwik.getContext().openFileInput(EVENTS_FILE);
+            br = new BufferedReader(new FileReader(file));
+            String line;
+            List<String> events = new ArrayList<>();
+            while ((line = br.readLine()) != null) {
+                if (line.length() > 0) {
+                    events.add(line);
+                }
+            }
+
+            return events;
+        } catch (IOException e) {
+            Logy.w(LOGGER_TAG, "file read error", e);
+            return Collections.EMPTY_LIST;
+        } finally {
+            closeResource(br);
+            closeResource(is);
+            file.delete();
+        }
+    }
+
+    private void saveEventsToFile(List<String> events) {
+        if (events == null || events.size() < 1)
+            return;
+        File file = mPiwik.getContext().getFileStreamPath(EVENTS_FILE);
+        if (file.exists())
+            file.delete();
+        OutputStream stream = null;
+        BufferedWriter bw = null;
+        try {
+            stream = mPiwik.getContext().openFileOutput(EVENTS_FILE, Context.MODE_PRIVATE);
+            bw = new BufferedWriter(new OutputStreamWriter(stream));
+            for (String event : events) {
+                bw.write(event);
+                bw.newLine();
+            }
+            bw.flush();
+        } catch (IOException e) {
+            Logy.w(LOGGER_TAG, "file write error", e);
+            file.delete();
+        } finally {
+            closeResource(bw);
+            closeResource(stream);
+        }
+
+    }
+
+    private void closeResource(Closeable closable) {
+        try {
+            if (closable != null) {
+                closable.close();
+            }
+        } catch (Exception ignore) {
+
+        }
+    }
 }
