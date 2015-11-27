@@ -15,6 +15,7 @@ import org.json.JSONObject;
 import org.piwik.sdk.tools.Logy;
 
 import java.net.URL;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -67,6 +68,17 @@ public class TrackerBulkURLWrapper {
 
     public URL getApiUrl() {
         return mApiUrl;
+    }
+
+    /**
+     * @param page
+     * @return
+     */
+    public List<String> getEventsByList(Page page) {
+        if (page == null || page.isEmpty()) {
+            return Collections.EMPTY_LIST;
+        }
+        return mEvents.subList(page.fromIndex, page.toIndex);
     }
 
     /**

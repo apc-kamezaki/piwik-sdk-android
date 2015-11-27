@@ -139,22 +139,35 @@ public class Dispatcher {
                 Logy.d(LOGGER_TAG, "Drained " + availableEvents.size() + " events.");
                 TrackerBulkURLWrapper wrapper = new TrackerBulkURLWrapper(mApiUrl, availableEvents, mAuthToken);
                 Iterator<TrackerBulkURLWrapper.Page> pageIterator = wrapper.iterator();
+                TrackerBulkURLWrapper.Page page = null;
+                boolean success = true;
                 while (pageIterator.hasNext()) {
-                    TrackerBulkURLWrapper.Page page = pageIterator.next();
+                    page = pageIterator.next();
 
                     // use doGET when only event on current page
                     if (page.elementsCount() > 1) {
-                        if (doPost(wrapper.getApiUrl(), wrapper.getEvents(page)))
-                            count += page.elementsCount();
+                        if (!doPost(wrapper.getApiUrl(), wrapper.getEvents(page))) {
+                            success = false;
+                            break;
+                        }
+                        count += page.elementsCount();
                     } else {
-                        if (doGet(wrapper.getEventUrl(page)))
-                            count += 1;
+                        if (!doGet(wrapper.getEventUrl(page))) {
+                            success = false;
+                            break;
+                        }
+                        count += 1;
                     }
+                }
+                if (!success) {
+                    do {
+                        mDispatchQueue.addAll(wrapper.getEventsByList(page));
+                    } while ((page = pageIterator.next()) != null);
                 }
                 Logy.d(LOGGER_TAG, "Dispatched " + count + " events.");
                 synchronized (mThreadControl) {
                     // We may be done or this was a forced dispatch
-                    if (mDispatchQueue.isEmpty() || mDispatchInterval < 0) {
+                    if (mDispatchQueue.isEmpty() || mDispatchInterval < 0 || !success) {
                         mRunning = false;
                         break;
                     }
